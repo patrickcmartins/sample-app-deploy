@@ -1,0 +1,6 @@
+apiVersion: v2
+name: sample-app
+description: Deploy do sample-app com canary, retries, timeout e zero-trust via Istio.
+type: application
+version: 0.1.0
+appVersion: "dev"

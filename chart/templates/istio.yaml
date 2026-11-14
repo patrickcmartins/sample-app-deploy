@@ -1,0 +1,67 @@
+{{- $host := include "app.host" . }}
+apiVersion: networking.istio.io/v1
+kind: DestinationRule
+metadata:
+  name: {{ include "app.name" . }}
+spec:
+  host: {{ $host }}
+  trafficPolicy:
+    tls: { mode: ISTIO_MUTUAL }
+    outlierDetection:            # ejeta pods que falham em sequência
+      consecutive5xxErrors: 5
+      interval: 10s
+      baseEjectionTime: 30s
+  subsets:
+    {{- range .Values.versions }}
+    - name: {{ .name }}
+      labels: { version: {{ .name }} }
+    {{- end }}
+---
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: {{ include "app.name" . }}
+spec:
+  hosts:
+    - {{ .Values.istio.host | quote }}
+    - {{ $host }}
+  gateways:
+    - {{ .Values.istio.gateway }}
+    - mesh
+  http:
+    # Header "x-version: <nome>" força uma versão (testar o canary antes de dar peso).
+    {{- range .Values.versions }}
+    - name: force-{{ .name }}
+      match:
+        - headers:
+            x-version: { exact: {{ .name }} }
+      route:
+        - destination: { host: {{ $host }}, subset: {{ .name }} }
+    {{- end }}
+    - name: weighted
+      timeout: {{ .Values.istio.timeout }}
+      retries:
+        {{- toYaml .Values.istio.retries | nindent 8 }}
+      route:
+        {{- range .Values.versions }}
+        - destination:
+            host: {{ $host }}
+            subset: {{ .name }}
+            port: { number: {{ $.Values.service.port }} }
+          weight: {{ .weight }}
+        {{- end }}
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: {{ include "app.name" . }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "app.selector" . | nindent 6 }}
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals:
+              {{- toYaml .Values.istio.allowedPrincipals | nindent 14 }}

@@ -1,0 +1,38 @@
+# Promoção explícita: copia a tag de um ambiente para outro via PULL REQUEST.
+# O merge do PR é o "apply" de prod, com review, histórico e rollback por git revert.
+name: promote
+on:
+  workflow_dispatch:
+    inputs:
+      from:
+        description: ambiente de origem
+        default: kind-dev
+      to:
+        description: ambiente de destino
+        default: eks-prod
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - id: tag
+        env:
+          FROM: ${{ inputs.from }}
+          TO: ${{ inputs.to }}
+        run: |
+          tag=$(yq '.image.tag' "envs/$FROM/values.yaml")
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          TAG="$tag" yq -i '.image.tag = strenv(TAG)' "envs/$TO/values.yaml"
+      - uses: peter-evans/create-pull-request@v7
+        with:
+          branch: promote/${{ inputs.to }}-${{ steps.tag.outputs.tag }}
+          title: "promote(${{ inputs.to }}): sample-app ${{ steps.tag.outputs.tag }}"
+          commit-message: "promote(${{ inputs.to }}): sample-app ${{ steps.tag.outputs.tag }}"
+          body: |
+            Promove `${{ steps.tag.outputs.tag }}` de **${{ inputs.from }}** para **${{ inputs.to }}**.
+            Após o merge, o Argo CD sincroniza `sample-app-${{ inputs.to }}`.

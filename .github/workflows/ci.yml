@@ -1,0 +1,27 @@
+name: ci
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+      - name: helm lint + template por ambiente
+        run: |
+          mkdir -p out
+          for env in envs/*/; do
+            name=$(basename "$env")
+            helm lint chart -f "$env/values.yaml"
+            helm template sample-app chart -n sample -f "$env/values.yaml" > "out/$name.yaml"
+          done
+      - name: kubeconform
+        run: |
+          docker run --rm -v "$PWD/out:/out" ghcr.io/yannh/kubeconform:v0.7.0 -strict -summary \
+            -schema-location default \
+            -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
+            /out

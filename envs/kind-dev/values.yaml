@@ -1,0 +1,12 @@
+# DEV: o CI do sample-app atualiza image.tag automaticamente a cada merge na main.
+cluster: kind-dev
+image:
+  tag: sha-0000000
+istio:
+  host: sample.localtest.me
+versions:
+  - name: stable
+    weight: 100
+    replicas: 1
+    color: "#2e7d32"
+    message: "olá do kind-dev"

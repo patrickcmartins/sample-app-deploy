@@ -1,0 +1,39 @@
+# Defaults. Cada ambiente sobrescreve em envs/<cluster>/values.yaml.
+image:
+  repository: ghcr.io/patrickcmartins/sample-app
+  tag: ""                     # obrigatório: sha-xxxxxxx (imutável)
+  pullPolicy: IfNotPresent
+
+cluster: ""                   # aparece na resposta (qual "cloud" respondeu)
+
+# Cada versão vira um Deployment + subset no DestinationRule.
+# Canary = duas entradas com pesos (somam 100). Cada versão pode fixar a própria tag.
+versions:
+  - name: stable
+    weight: 100
+    replicas: 1
+    color: "#34577c"
+    message: "olá do stable"
+    env: {}                   # ex.: FAILURE_RATE: "0.3"
+
+service:
+  port: 8080
+
+istio:
+  host: sample.localtest.me
+  gateway: istio-ingress/public-gateway
+  timeout: 5s
+  retries:
+    attempts: 3
+    perTryTimeout: 2s
+    retryOn: 5xx,reset,connect-failure
+  # Zero-trust: só o ingress gateway chama o app.
+  allowedPrincipals:
+    - cluster.local/ns/istio-ingress/sa/istio-ingressgateway
+
+resources:
+  requests: { cpu: 10m, memory: 16Mi }
+  limits: { memory: 64Mi }
+
+podDisruptionBudget:
+  enabled: false

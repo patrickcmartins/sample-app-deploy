@@ -1,0 +1,57 @@
+{{- range .Values.versions }}
+{{- $tag := .tag | default $.Values.image.tag }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "app.name" $ }}-{{ .name }}
+  labels:
+    {{- include "app.labels" $ | nindent 4 }}
+    version: {{ .name }}
+spec:
+  replicas: {{ .replicas }}
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      {{- include "app.selector" $ | nindent 6 }}
+      version: {{ .name }}
+  template:
+    metadata:
+      labels:
+        {{- include "app.selector" $ | nindent 8 }}
+        version: {{ .name }}
+    spec:
+      serviceAccountName: {{ include "app.name" $ }}
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: app
+          image: "{{ $.Values.image.repository }}:{{ $tag }}"
+          imagePullPolicy: {{ $.Values.image.pullPolicy }}
+          ports:
+            - { name: http, containerPort: 8080, protocol: TCP }
+          env:
+            - { name: COLOR, value: {{ .color | default "#34577c" | quote }} }
+            - { name: MESSAGE, value: {{ .message | default "olá" | quote }} }
+            - { name: CLUSTER_NAME, value: {{ $.Values.cluster | default "unknown" | quote }} }
+            {{- range $k, $v := .env }}
+            - { name: {{ $k }}, value: {{ $v | quote }} }
+            {{- end }}
+          readinessProbe:
+            httpGet: { path: /readyz, port: http }
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 10
+          resources:
+            {{- toYaml $.Values.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+---
+{{- end }}

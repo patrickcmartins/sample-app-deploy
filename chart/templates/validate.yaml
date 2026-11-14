@@ -1,0 +1,5 @@
+{{- $total := 0 }}
+{{- range .Values.versions }}{{ $total = add $total .weight }}{{ end }}
+{{- if ne (int $total) 100 }}
+{{- fail (printf "a soma dos weights em versions deve ser 100 (atual: %d)" (int $total)) }}
+{{- end }}

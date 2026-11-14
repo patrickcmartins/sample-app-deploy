@@ -1,0 +1,19 @@
+# PROD: só muda por PR (workflow "promote"). Canary: dê peso ao "canary" aos poucos.
+cluster: eks-prod
+image:
+  tag: sha-0000000
+istio:
+  host: "*"
+podDisruptionBudget:
+  enabled: true
+versions:
+  - name: stable
+    weight: 100
+    replicas: 2
+    color: "#34577c"
+    message: "olá do eks-prod"
+  - name: canary
+    weight: 0
+    replicas: 0
+    color: "#e65100"
+    message: "canary no eks-prod"
