@@ -28,3 +28,29 @@ versions:
 2. Suba os pesos aos poucos (10 → 50 → 100) e depois faça do canary a `stable`.
 
 O `values.schema.json` bloqueia `latest` e o template falha se a soma dos pesos for diferente de 100.
+
+## Componentes e quem fala com quem (zero trust)
+
+```
+istio-ingressgateway ──▶ sample-app (frontend) ──▶ sample-app-backend ──▶ sample-app-redis
+                              │                                              ▲
+                              └─ evento ──▶ Kafka (ns kafka) ──▶ sample-app-worker ─┘
+```
+
+Cada componente tem **ServiceAccount própria** (= identidade SPIFFE no mTLS do Istio), e cada um tem uma
+`AuthorizationPolicy` que libera **só** quem precisa chamar:
+
+| Destino | Quem pode | Como |
+|---|---|---|
+| frontend | só o ingress gateway | principal do gateway |
+| backend | só o frontend, só `GET /quote` | principal + método + path |
+| redis | só backend e worker, só a porta 6379 | principal + porta |
+| worker | ninguém (só consome) | política ALLOW vazia = nega tudo |
+
+O Prometheus não tem sidecar: a porta de métricas do exporter do Redis (9121) é a **única** exceção ao mTLS STRICT
+(`PeerAuthentication` com `portLevelMtls`).
+
+| Ambiente | Kafka/worker | OTel | Métricas (PodMonitor) |
+|---|---|---|---|
+| kind-dev | não (o PC não aguenta) | não | não |
+| eks-prod | sim | sim | sim |

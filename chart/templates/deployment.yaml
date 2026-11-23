@@ -38,6 +38,15 @@ spec:
             - { name: COLOR, value: {{ .color | default "#34577c" | quote }} }
             - { name: MESSAGE, value: {{ .message | default "olá" | quote }} }
             - { name: CLUSTER_NAME, value: {{ $.Values.cluster | default "unknown" | quote }} }
+            - { name: ROLE, value: frontend }
+            {{- if $.Values.backend.enabled }}
+            - { name: BACKEND_URL, value: "http://{{ include "app.name" $ }}-backend:{{ $.Values.service.port }}" }
+            {{- end }}
+            {{- with $.Values.kafka.brokers }}
+            - { name: KAFKA_BROKERS, value: {{ . | quote }} }
+            - { name: KAFKA_TOPIC, value: {{ $.Values.kafka.topic | quote }} }
+            {{- end }}
+            {{- include "app.otelEnv" (dict "ctx" $ "service" "frontend" "tag" $tag) | nindent 12 }}
             {{- range $k, $v := .env }}
             - { name: {{ $k }}, value: {{ $v | quote }} }
             {{- end }}

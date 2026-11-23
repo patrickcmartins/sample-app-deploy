@@ -1,0 +1,152 @@
+{{- if .Values.redis.enabled }}
+{{- $name := printf "%s-redis" (include "app.name" .) }}
+# Redis como CACHE da aplicação: sem persistência, com limite de memória e despejo LRU.
+# Se cair, o backend faz fail-open (vai à fonte) e o worker segura o offset (lag cresce).
+#
+# Mundo ideal em prod: ElastiCache (gerenciado, multi-AZ, failover automático) provisionado
+# pelo Terraform; aqui fica no cluster para o lab ser barato e para o experimento de caos.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $name }}
+  labels: {{- include "app.labels" . | nindent 4 }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "app.labels" . | nindent 4 }}
+    app.kubernetes.io/component: cache
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ $name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ $name }}
+        app.kubernetes.io/component: cache
+    spec:
+      serviceAccountName: {{ $name }}
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999          # usuário "redis" da imagem oficial
+        runAsGroup: 999
+        fsGroup: 999
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: redis
+          image: {{ .Values.redis.image | quote }}
+          args:
+            - --save
+            - ""
+            - --appendonly
+            - "no"
+            - --maxmemory
+            - {{ .Values.redis.maxmemory | quote }}
+            - --maxmemory-policy
+            - allkeys-lru
+          ports:
+            - { name: tcp-redis, containerPort: 6379, protocol: TCP }
+          readinessProbe:
+            exec: { command: ["redis-cli", "ping"] }
+            periodSeconds: 5
+          livenessProbe:
+            tcpSocket: { port: tcp-redis }
+            periodSeconds: 10
+          resources:
+            requests: { cpu: 20m, memory: 32Mi }
+            limits: { memory: 128Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          volumeMounts:
+            - { name: data, mountPath: /data }
+        {{- if .Values.monitoring.enabled }}
+        # Métricas do Redis (hits/misses, memória, conexões, evictions) para o Prometheus.
+        - name: exporter
+          image: {{ .Values.redis.exporterImage | quote }}
+          env:
+            - { name: REDIS_ADDR, value: "redis://localhost:6379" }
+          ports:
+            - { name: http-metrics, containerPort: 9121, protocol: TCP }
+          resources:
+            requests: { cpu: 10m, memory: 16Mi }
+            limits: { memory: 64Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+        {{- end }}
+      volumes:
+        - name: data
+          emptyDir: { sizeLimit: 256Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels: {{- include "app.labels" . | nindent 4 }}
+spec:
+  selector:
+    app.kubernetes.io/name: {{ $name }}
+  ports:
+    - { name: tcp-redis, port: 6379, targetPort: tcp-redis }
+---
+# Só o backend e o worker falam com o Redis (identidade via mTLS do mesh).
+# O Prometheus (sem sidecar) raspa a porta do exporter: liberada só nessa porta.
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: {{ $name }}
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ $name }}
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals:
+              - {{ include "app.principal" (dict "ctx" . "sa" (printf "%s-backend" (include "app.name" .))) | quote }}
+              - {{ include "app.principal" (dict "ctx" . "sa" (printf "%s-worker" (include "app.name" .))) | quote }}
+      to:
+        - operation: { ports: ["6379"] }
+    {{- if .Values.monitoring.enabled }}
+    - to:
+        - operation: { ports: ["9121"] }
+    {{- end }}
+{{- if .Values.monitoring.enabled }}
+---
+# O mesh está em mTLS STRICT, mas o Prometheus não tem sidecar (fala texto puro).
+# Abre exceção SÓ na porta de métricas; a 6379 continua exigindo mTLS.
+apiVersion: security.istio.io/v1
+kind: PeerAuthentication
+metadata:
+  name: {{ $name }}-metrics
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ $name }}
+  mtls: { mode: STRICT }
+  portLevelMtls:
+    9121: { mode: PERMISSIVE }
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: {{ $name }}
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ $name }}
+  podMetricsEndpoints:
+    - port: http-metrics
+      interval: 30s
+{{- end }}
+{{- end }}

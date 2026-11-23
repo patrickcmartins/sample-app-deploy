@@ -1,0 +1,73 @@
+{{- if and .Values.worker.enabled .Values.kafka.brokers }}
+{{- $name := printf "%s-worker" (include "app.name" .) }}
+{{- $tag := .Values.worker.tag | default .Values.image.tag }}
+# Worker: consumer group do tópico de eventos. Não recebe tráfego (sem Service);
+# /stats fica acessível só por port-forward. Escala horizontal até o nº de partições.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $name }}
+  labels: {{- include "app.labels" . | nindent 4 }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "app.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+spec:
+  replicas: {{ .Values.worker.replicas }}
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ $name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ $name }}
+        app.kubernetes.io/component: worker
+        version: {{ $tag }}
+    spec:
+      serviceAccountName: {{ $name }}
+      {{- include "app.podSecurity" . | nindent 6 }}
+      # Tempo para terminar o lote atual e confirmar offsets antes de sair (rebalance limpo).
+      terminationGracePeriodSeconds: 45
+      containers:
+        - name: app
+          image: "{{ .Values.image.repository }}:{{ $tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - { name: http, containerPort: 8080, protocol: TCP }
+          env:
+            - { name: ROLE, value: worker }
+            - { name: CLUSTER_NAME, value: {{ .Values.cluster | default "unknown" | quote }} }
+            - { name: KAFKA_BROKERS, value: {{ .Values.kafka.brokers | quote }} }
+            - { name: KAFKA_TOPIC, value: {{ .Values.kafka.topic | quote }} }
+            - { name: KAFKA_GROUP, value: {{ .Values.worker.group | quote }} }
+            - { name: REDIS_ADDR, value: "{{ include "app.name" . }}-redis:6379" }
+            {{- range $k, $v := .Values.worker.env }}
+            - { name: {{ $k }}, value: {{ $v | quote }} }
+            {{- end }}
+            {{- include "app.otelEnv" (dict "ctx" . "service" "worker" "tag" $tag) | nindent 12 }}
+          readinessProbe:
+            httpGet: { path: /readyz, port: http }
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 10
+          resources: {{- toYaml .Values.resources | nindent 12 }}
+          {{- include "app.containerSecurity" . | nindent 10 }}
+---
+# Ninguém chama o worker: política vazia de ALLOW = nega tudo (exceto probes do kubelet,
+# que o sidecar reescreve). Deixa explícito que ele é só consumidor.
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: {{ $name }}
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ $name }}
+  action: ALLOW
+{{- end }}

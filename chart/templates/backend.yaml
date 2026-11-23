@@ -1,0 +1,129 @@
+{{- if .Values.backend.enabled }}
+{{- $name := printf "%s-backend" (include "app.name" .) }}
+{{- $tag := .Values.backend.tag | default .Values.image.tag }}
+# Backend: chamado SÓ pelo frontend (AuthorizationPolicy), com cache-aside no Redis.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $name }}
+  labels: {{- include "app.labels" . | nindent 4 }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "app.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backend
+spec:
+  replicas: {{ .Values.backend.replicas }}
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ $name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ $name }}
+        app.kubernetes.io/component: backend
+        version: {{ $tag }}
+    spec:
+      serviceAccountName: {{ $name }}
+      {{- include "app.podSecurity" . | nindent 6 }}
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: app
+          image: "{{ .Values.image.repository }}:{{ $tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - { name: http, containerPort: 8080, protocol: TCP }
+          env:
+            - { name: ROLE, value: backend }
+            - { name: CLUSTER_NAME, value: {{ .Values.cluster | default "unknown" | quote }} }
+            {{- if .Values.redis.enabled }}
+            - { name: REDIS_ADDR, value: "{{ include "app.name" . }}-redis:6379" }
+            {{- end }}
+            {{- range $k, $v := .Values.backend.env }}
+            - { name: {{ $k }}, value: {{ $v | quote }} }
+            {{- end }}
+            {{- include "app.otelEnv" (dict "ctx" . "service" "backend" "tag" $tag) | nindent 12 }}
+          readinessProbe:
+            httpGet: { path: /readyz, port: http }
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 10
+          resources: {{- toYaml .Values.resources | nindent 12 }}
+          {{- include "app.containerSecurity" . | nindent 10 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels: {{- include "app.labels" . | nindent 4 }}
+spec:
+  selector:
+    app.kubernetes.io/name: {{ $name }}
+  ports:
+    - { name: http, port: {{ .Values.service.port }}, targetPort: http }
+---
+# Resiliência na chamada frontend -> backend, feita pelo mesh (sem código):
+# timeout curto, retry só em erro de conexão/5xx, e ejeção de pod que falha em sequência.
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: {{ $name }}
+spec:
+  hosts: [{{ $name }}]
+  http:
+    - timeout: {{ .Values.backend.timeout }}
+      retries:
+        attempts: 2
+        perTryTimeout: {{ .Values.backend.perTryTimeout }}
+        retryOn: 5xx,reset,connect-failure
+      route:
+        - destination: { host: {{ $name }} }
+---
+apiVersion: networking.istio.io/v1
+kind: DestinationRule
+metadata:
+  name: {{ $name }}
+spec:
+  host: {{ $name }}
+  trafficPolicy:
+    tls: { mode: ISTIO_MUTUAL }
+    connectionPool:
+      http: { http1MaxPendingRequests: 100, maxRequestsPerConnection: 100 }
+    outlierDetection:
+      consecutive5xxErrors: 5
+      interval: 10s
+      baseEjectionTime: 30s
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: {{ $name }}
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ $name }}
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals: [{{ include "app.principal" (dict "ctx" . "sa" (include "app.name" .)) | quote }}]
+      to:
+        - operation: { methods: ["GET"], paths: ["/quote"] }
+{{- if .Values.podDisruptionBudget.enabled }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ $name }}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ $name }}
+{{- end }}
+{{- end }}

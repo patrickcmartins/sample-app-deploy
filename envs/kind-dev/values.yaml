@@ -1,7 +1,8 @@
 # DEV: o CI do sample-app atualiza image.tag automaticamente a cada merge na main.
 cluster: kind-dev
+environment: dev
 image:
-  tag: sha-0000000
+  tag: sha-8e73a07
 istio:
   host: sample.localtest.me
 versions:
@@ -10,3 +11,5 @@ versions:
     replicas: 1
     color: "#2e7d32"
     message: "olá do kind-dev"
+
+# Dev local: sem Kafka, sem Collector (o PC não aguenta). Redis + backend sim (leves).

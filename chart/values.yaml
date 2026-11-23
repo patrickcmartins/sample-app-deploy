@@ -37,3 +37,42 @@ resources:
 
 podDisruptionBudget:
   enabled: false
+
+environment: dev              # vai para deployment.environment (OTel) e para os dashboards
+
+# Backend: só o frontend chama (AuthorizationPolicy). Cache-aside no Redis.
+backend:
+  enabled: true
+  replicas: 1
+  tag: ""                     # vazio = image.tag (permite canary/rollback por componente)
+  timeout: 1s                 # frontend -> backend (VirtualService)
+  perTryTimeout: 400ms
+  env: {}                     # ex.: FAILURE_RATE, DELAY, HIGH_CARDINALITY, SOURCE_LATENCY
+
+# Worker: consumer group do tópico de eventos. Só sobe se kafka.brokers estiver definido.
+worker:
+  enabled: true
+  replicas: 1                 # <= partições do tópico
+  tag: ""
+  group: quote-stats
+  env: {}                     # ex.: DELAY (worker lento = lag)
+
+redis:
+  enabled: true
+  image: "redis:8.10.3-alpine@sha256:7958cfbb9d152f87dadfbc89f1b0b15938f0b81ff8982feb327476f4911935c3"
+  exporterImage: "oliver006/redis_exporter:v1.98.0@sha256:2b68665248d909bb25de9d175c648932a8c358ba143e5dbed1eb48f91cc9d2e1"
+  maxmemory: 64mb
+
+# Vazio = sem eventos (o frontend não publica, o worker não sobe).
+kafka:
+  brokers: ""                 # ex.: events-kafka-bootstrap.kafka:9092
+  topic: quotes.served
+
+# Telemetria (OTLP). Desligado onde não há Collector.
+otel:
+  enabled: false
+  endpoint: http://otel-collector.observability:4318
+
+# PodMonitor/PeerAuthentication de métricas (precisa do kube-prometheus-stack no cluster).
+monitoring:
+  enabled: false

@@ -1,7 +1,8 @@
 # PROD: só muda por PR (workflow "promote"). Canary: dê peso ao "canary" aos poucos.
 cluster: eks-prod
+environment: prod
 image:
-  tag: sha-0000000
+  tag: sha-8e73a07
 istio:
   host: "*"
 podDisruptionBudget:
@@ -17,3 +18,15 @@ versions:
     replicas: 0
     color: "#e65100"
     message: "canary no eks-prod"
+
+backend:
+  replicas: 2
+
+kafka:
+  brokers: events-kafka-bootstrap.kafka:9092
+
+otel:
+  enabled: true
+
+monitoring:
+  enabled: true
