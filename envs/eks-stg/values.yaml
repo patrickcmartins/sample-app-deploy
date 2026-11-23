@@ -4,7 +4,7 @@ environment: stg
 image:
   tag: sha-8e73a07
 istio:
-  host: "*"
+  host: app.stg.patricktf.neosix.me    # nunca "*" na borda: sequestra as rotas de outros (ex.: Grafana)
 podDisruptionBudget:
   enabled: true
 versions:
