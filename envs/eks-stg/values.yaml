@@ -1,0 +1,32 @@
+# STG: recebe toda versão nova primeiro (CI do sample-app). Prod só recebe por PR de promoção.
+cluster: eks-stg
+environment: stg
+image:
+  tag: sha-8e73a07
+istio:
+  host: "*"
+podDisruptionBudget:
+  enabled: true
+versions:
+  - name: stable
+    weight: 100
+    replicas: 2
+    color: "#34577c"
+    message: "olá do eks-stg"
+  - name: canary
+    weight: 0
+    replicas: 0
+    color: "#e65100"
+    message: "canary no eks-stg"
+
+backend:
+  replicas: 2
+
+kafka:
+  brokers: events-kafka-bootstrap.kafka:9092
+
+otel:
+  enabled: true
+
+monitoring:
+  enabled: true

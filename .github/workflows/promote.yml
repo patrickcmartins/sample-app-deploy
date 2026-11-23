@@ -5,10 +5,14 @@ on:
   workflow_dispatch:
     inputs:
       from:
-        description: ambiente de origem
-        default: kind-dev
+        description: ambiente de origem (onde a versão já foi validada)
+        type: choice
+        options: [eks-stg, kind-dev]
+        default: eks-stg
       to:
         description: ambiente de destino
+        type: choice
+        options: [eks-prod, eks-stg]
         default: eks-prod
 
 permissions:
@@ -25,7 +29,10 @@ jobs:
           FROM: ${{ inputs.from }}
           TO: ${{ inputs.to }}
         run: |
+          if [ "$FROM" = "$TO" ]; then echo "::error::origem e destino iguais"; exit 1; fi
           tag=$(yq '.image.tag' "envs/$FROM/values.yaml")
+          current=$(yq '.image.tag' "envs/$TO/values.yaml")
+          if [ "$tag" = "$current" ]; then echo "::notice::$TO já está em $tag"; exit 1; fi
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           TAG="$tag" yq -i '.image.tag = strenv(TAG)' "envs/$TO/values.yaml"
       - uses: peter-evans/create-pull-request@v7
