@@ -13,11 +13,13 @@ versions:
     replicas: 2
     color: "#34577c"
     message: "olá do eks-prod"
+  # BLUE-GREEN passo 1: green sobe COMPLETO (mesmas réplicas do blue), com 0% do tráfego.
+  # Testável por header (x-version: canary) antes de qualquer usuário ver.
   - name: canary
     weight: 0
-    replicas: 0
-    color: "#e65100"
-    message: "canary no eks-prod"
+    replicas: 2
+    color: "#2e7d32"
+    message: "GREEN no eks-prod"
 
 backend:
   replicas: 2
