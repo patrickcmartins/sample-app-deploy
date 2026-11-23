@@ -4,7 +4,7 @@ environment: prod
 image:
   tag: sha-8e73a07
 istio:
-  host: "*"
+  host: app.prod.patricktf.neosix.me
 podDisruptionBudget:
   enabled: true
 versions:
