@@ -25,3 +25,8 @@ jobs:
             -schema-location default \
             -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
             /out
+      # Shift left: as MESMAS regras do webhook de validação do Istio, sem cluster.
+      # (Um VirtualService inválido entrou em prod quando o webhook estava fora; o stg recusou.)
+      - name: istioctl validate
+        run: |
+          docker run --rm -v "$PWD/out:/out" istio/istioctl:1.30.8 validate -f /out

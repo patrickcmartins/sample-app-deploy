@@ -17,6 +17,34 @@ spec:
       labels: { version: {{ .name }} }
     {{- end }}
 ---
+{{- define "app.httpRoutes" -}}
+# Header "x-version: <nome>" força uma versão (testar o canary antes de dar peso).
+{{- range .Values.versions }}
+- name: force-{{ .name }}
+  match:
+    - headers:
+        x-version: { exact: {{ .name }} }
+  route:
+    - destination: { host: {{ include "app.host" $ }}, subset: {{ .name }} }
+{{- end }}
+- name: weighted
+  timeout: {{ .Values.istio.timeout }}
+  retries:
+    {{- toYaml .Values.istio.retries | nindent 4 }}
+  route:
+    {{- range .Values.versions }}
+    - destination:
+        host: {{ include "app.host" $ }}
+        subset: {{ .name }}
+        port: { number: {{ $.Values.service.port }} }
+      weight: {{ .weight }}
+    {{- end }}
+{{- end }}
+# Dois VirtualServices com as MESMAS rotas:
+#  - borda: host público (pode ser "*"), ligado só ao gateway de entrada;
+#  - mesh: host interno do Service, para chamadas de dentro do cluster.
+# Um VS só com host "*" + gateway "mesh" é inválido (o webhook do Istio recusa): "*" no mesh
+# capturaria o tráfego de TODOS os serviços.
 apiVersion: networking.istio.io/v1
 kind: VirtualService
 metadata:
@@ -24,32 +52,22 @@ metadata:
 spec:
   hosts:
     - {{ .Values.istio.host | quote }}
-    - {{ $host }}
   gateways:
     - {{ .Values.istio.gateway }}
+  http:
+    {{- include "app.httpRoutes" . | nindent 4 }}
+---
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: {{ include "app.name" . }}-mesh
+spec:
+  hosts:
+    - {{ $host }}
+  gateways:
     - mesh
   http:
-    # Header "x-version: <nome>" força uma versão (testar o canary antes de dar peso).
-    {{- range .Values.versions }}
-    - name: force-{{ .name }}
-      match:
-        - headers:
-            x-version: { exact: {{ .name }} }
-      route:
-        - destination: { host: {{ $host }}, subset: {{ .name }} }
-    {{- end }}
-    - name: weighted
-      timeout: {{ .Values.istio.timeout }}
-      retries:
-        {{- toYaml .Values.istio.retries | nindent 8 }}
-      route:
-        {{- range .Values.versions }}
-        - destination:
-            host: {{ $host }}
-            subset: {{ .name }}
-            port: { number: {{ $.Values.service.port }} }
-          weight: {{ .weight }}
-        {{- end }}
+    {{- include "app.httpRoutes" . | nindent 4 }}
 ---
 apiVersion: security.istio.io/v1
 kind: AuthorizationPolicy
