@@ -12,7 +12,7 @@ on:
       to:
         description: ambiente de destino
         type: choice
-        options: [eks-prod, eks-stg]
+        options: [eks-prod]   # stg recebe versões pelo CD do sample-app, não por promoção
         default: eks-prod
 
 permissions:
@@ -22,6 +22,8 @@ permissions:
 jobs:
   promote:
     runs-on: ubuntu-latest
+    # GitHub Environment: para prod, o job pausa até um aprovador liberar (infra-live/github).
+    environment: production
     steps:
       - uses: actions/checkout@v4
       - id: tag
